@@ -8,6 +8,7 @@ public class Config {
     private String dataDir = "MiniBase";
     private int maxDiskFiles = 10;
     private int maxThreadPoolSize = 5;
+    private int flushInterval = 60;
 
     public static Config getDefault() {
         return DEFAULT;
@@ -55,6 +56,15 @@ public class Config {
 
     public Config setMaxThreadPoolSize(int maxThreadPoolSize) {
         this.maxThreadPoolSize = maxThreadPoolSize;
+        return this;
+    }
+
+    public int getFlushInterval() {
+        return flushInterval;
+    }
+
+    public Config setFlushInterval(int flushInterval) {
+        this.flushInterval = flushInterval;
         return this;
     }
 }

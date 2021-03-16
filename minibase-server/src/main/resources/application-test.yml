@@ -1,15 +1,16 @@
 server:
-  port: 8098
+  port: 8099
 
 spring:
   profiles: test
-  application.name: spring-mybatis
+  application.name: spring-minibase
 
 minibase:
   storage:
     maxMemstoreSize: 16
     flushMaxRetries: 3
-    dataDir: minibase
+    flushInterval: 300
+    dataDir: E:\study\hbase\minibase\data
     maxDiskFiles: 10
     maxThreadPoolSize: 5
 
