@@ -26,6 +26,7 @@ public class MemStore implements Closeable {
     private final AtomicBoolean isSnapshotFlushing = new AtomicBoolean(false);
     private volatile ConcurrentSkipListMap<KeyValue, KeyValue> kvMap;
     private volatile ConcurrentSkipListMap<KeyValue, KeyValue> snapshot;
+    private CommitLog commitLog;
     private ExecutorService pool;
 
     private Config conf;
@@ -39,12 +40,28 @@ public class MemStore implements Closeable {
         dataSize.set(0);
         this.kvMap = new ConcurrentSkipListMap<>();
         this.snapshot = null;
+        commitLog = new CommitLog(conf.getDataDir());
+        commitLog.replay(new KvLogCallBack() {
+
+        });
     }
 
     public void add(KeyValue kv) throws IOException {
+        add(kv, true);
+    }
+
+    public void addWithoutWAL(KeyValue kv) throws IOException {
+        add(kv, false);
+    }
+
+    public void add(KeyValue kv, boolean wal) throws IOException {
         flushIfNeeded(true);
+        //todo implement WAL
         updateLock.readLock().lock();
         try {
+            if (wal) {
+                commitLog.write(kv);
+            }
             KeyValue prevKeyValue;
             if ((prevKeyValue = kvMap.put(kv, kv)) == null) {
                 dataSize.addAndGet(kv.getSerializeSize());
@@ -118,9 +135,11 @@ public class MemStore implements Closeable {
             updateLock.writeLock().lock();
             try {
                 snapshot = kvMap;
-                // TODO MemStoreIter may find the kvMap changed ? should synchronize ?
+                // TODO MemStoreIter may find the kvMap changed ? should synchronize ? No we should not, we should use local variable pointing to the kvMap memory area when scanning.
                 kvMap = new ConcurrentSkipListMap<>();
                 dataSize.set(0);
+                //TODO switch commitLog current fileName
+                commitLog.nextFile();
             } finally {
                 updateLock.writeLock().unlock();
             }
@@ -131,6 +150,7 @@ public class MemStore implements Closeable {
                 try {
                     flusher.flush(new IteratorWrapper(snapshot));
                     success = true;
+                    commitLog.deleteFormerFile();
                 } catch (IOException e) {
                     LOG.error("Failed to flush memstore, retries=" + i + ", maxFlushRetries="
                                     + conf.getFlushMaxRetries(),
@@ -143,7 +163,7 @@ public class MemStore implements Closeable {
 
             // Step.3 clear the snapshot.
             if (success) {
-                // TODO MemStoreIter may get a NPE because we set null here ? should synchronize ?
+                // TODO MemStoreIter may get a NPE because we set null here ? should synchronize ? No we should not, we should use local variable pointing to the kvMap memory area when scanning.
                 snapshot = null;
                 isSnapshotFlushing.compareAndSet(true, false);
             }
