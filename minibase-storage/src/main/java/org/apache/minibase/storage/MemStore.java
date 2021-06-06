@@ -32,7 +32,7 @@ public class MemStore implements Closeable {
     private Config conf;
     private Flusher flusher;
 
-    public MemStore(Config conf, Flusher flusher, ExecutorService pool) {
+    public MemStore(Config conf, Flusher flusher, ExecutorService pool) throws IOException {
         this.conf = conf;
         this.flusher = flusher;
         this.pool = pool;
@@ -40,9 +40,13 @@ public class MemStore implements Closeable {
         dataSize.set(0);
         this.kvMap = new ConcurrentSkipListMap<>();
         this.snapshot = null;
-        commitLog = new CommitLog(conf.getDataDir());
-        commitLog.replay(new KvLogCallBack() {
-
+        commitLog = new CommitLog(conf.getDataDir(), (kv) -> {
+            KeyValue prevKeyValue;
+            if ((prevKeyValue = kvMap.put(kv, kv)) == null) {
+                dataSize.addAndGet(kv.getSerializeSize());
+            } else {
+                dataSize.addAndGet(kv.getSerializeSize() - prevKeyValue.getSerializeSize());
+            }
         });
     }
 
@@ -59,8 +63,8 @@ public class MemStore implements Closeable {
         //todo implement WAL
         updateLock.readLock().lock();
         try {
-            if (wal) {
-                commitLog.write(kv);
+            if (wal && !commitLog.write(kv)) {
+                throw new IOException("try to write commit-log error!");
             }
             KeyValue prevKeyValue;
             if ((prevKeyValue = kvMap.put(kv, kv)) == null) {
@@ -131,7 +135,7 @@ public class MemStore implements Closeable {
     private class FlusherTask implements Runnable {
         @Override
         public void run() {
-            // Step.1 memstore snpashot
+            // Step.1 memstore snapshot
             updateLock.writeLock().lock();
             try {
                 snapshot = kvMap;
