@@ -41,12 +41,7 @@ public class MemStore implements Closeable {
         this.kvMap = new ConcurrentSkipListMap<>();
         this.snapshot = null;
         commitLog = new CommitLog(conf.getDataDir(), (kv) -> {
-            KeyValue prevKeyValue;
-            if ((prevKeyValue = kvMap.put(kv, kv)) == null) {
-                dataSize.addAndGet(kv.getSerializeSize());
-            } else {
-                dataSize.addAndGet(kv.getSerializeSize() - prevKeyValue.getSerializeSize());
-            }
+            addWithoutWAL(kv);
         });
     }
 
@@ -81,6 +76,8 @@ public class MemStore implements Closeable {
     private void flushIfNeeded(boolean shouldBlocking) throws IOException {
         if (getDataSize() > conf.getMaxMemstoreSize()) {
             if (isSnapshotFlushing.get() && shouldBlocking) {
+                //this branch means that the task of flushing snapshot to diskFile has not been finished!
+                //we should stop writing to kvMap until flushing is finished.
                 throw new IOException(
                         "Memstore is full, currentDataSize=" + dataSize.get() + "B, maxMemstoreSize="
                                 + conf.getMaxMemstoreSize() + "B, please wait until the flushing is finished.");
@@ -154,7 +151,7 @@ public class MemStore implements Closeable {
                 try {
                     flusher.flush(new IteratorWrapper(snapshot));
                     success = true;
-                    commitLog.deleteFormerFile();
+                    commitLog.deleteStaledFile();
                 } catch (IOException e) {
                     LOG.error("Failed to flush memstore, retries=" + i + ", maxFlushRetries="
                                     + conf.getFlushMaxRetries(),

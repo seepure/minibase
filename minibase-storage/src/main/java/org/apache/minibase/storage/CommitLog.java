@@ -26,8 +26,9 @@ public class CommitLog {
     private final ScheduledExecutorService scheduledExecutorService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public static final String CURRENT_FILE = "minibase_commit_log.current";
-    public static final String PRE_FILE = "minibase_commit_log.pre";
+    public static final String FILE_CURRENT = "minibase_commit_log.current";
+    public static final String FILE_PRE = "minibase_commit_log.pre";
+    public static final String FILE_TO_BE_DEL = "minibase_commit_log.to_be_del";
 
     public CommitLog(String fileDir, ReadKvCallBack callBack) throws IOException {
         this.fileDir = fileDir;
@@ -39,7 +40,7 @@ public class CommitLog {
             FileOutputStream fileOutputStream = null;
             PrintWriter pw = null;
             try {
-                fileOutputStream = new FileOutputStream(fileDir + File.separator + CURRENT_FILE, true);
+                fileOutputStream = new FileOutputStream(fileDir + File.separator + FILE_CURRENT, true);
                 pw = new PrintWriter(fileOutputStream);
                 List<KeyValue> kvList = new ArrayList<>(kvBuffer.size() + 1);
                 kvBuffer.drainTo(kvList);
@@ -50,7 +51,8 @@ public class CommitLog {
                     pw.println(s);
                 }
             } catch (IOException e) {
-
+                //todo 还需要将这个异常抛到上层
+                LOG.error(e.getMessage(), e);
             } finally {
                 if (pw != null)
                     pw.close();
@@ -92,16 +94,21 @@ public class CommitLog {
     }
 
     public void nextFile() {
-
+        //在这里主要担心的一个问题是在进行nextFile操作时FILE_PRE是否会已存在?
+        //一般情况下不会存在！主要是因为在flushIfNeeded(true)中, 我们限制了在MemStore仍未完成snapshot flush到DiskStore时
+        //kvMap大小达到getMaxMemstoreSize()的后续写入。也就意味着当前进行nextFile操作时，上一个FILE_PRE肯定已经删除了!
+        //但是还是会出现存在上一个FILE_PRE的情况--
+        // case 1. 比如snapshot已经完成了flush, 但是还没来得及删除FILE_PRE时发生了断电, 重启后还是会出现上一个FILE_PRE还存在的情况;
+        // case 2. 上一次的snapshot的flush还没有完成, 但是发生了进程终止。
     }
 
-    public void deleteFormerFile() {
+    public void deleteStaledFile() {
 
     }
 
     protected void replay(ReadKvCallBack callBack) throws IOException {
-        String preFilePath = fileDir + File.separator + PRE_FILE;
-        String currentFilePath = fileDir + File.separator + CURRENT_FILE;
+        String preFilePath = fileDir + File.separator + FILE_PRE;
+        String currentFilePath = fileDir + File.separator + FILE_CURRENT;
         if (new File(preFilePath).exists()) {
             replaySingleFile(preFilePath, callBack);
         }
@@ -128,6 +135,6 @@ public class CommitLog {
     }
 
     interface ReadKvCallBack {
-        void replay(KeyValue kv);
+        void replay(KeyValue kv) throws IOException;
     }
 }
